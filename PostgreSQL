@@ -1,0 +1,27 @@
+PostgreSQL is a rdbs management system it is a open source database that work with json and sql queries it is highly scalable db.
+it has postgil extension for gis geographical information system 
+--------------------------------------------------------
+after installation connect it to with our application by psql
+psql -U postgre psql invloke the psql program -U indicate a user wants to connect with postgresql server
+after this command enter the password the nit will connect 
+-----------------
+check the version of postgre 
+select versio();
+-------------------------
+check the current databse 
+select current_database();
+------------------------
+as like mysql workbench it has pgadmin for gui for application 
+-----------------------------------
+CREATE DATABASE dvdrental; -- for create new db
+-----------------------------------------------------
+in mysql has import and export that has same restore and BACKUP operation here 
+--------------------------------------------------------
+it follows the same logic that follows the mysql also its works with sql so there is no change between the mysql and postgresql 
+-------------------------------------------------------------
+select firstname from users; 
+select * fro, users;
+-------------------------------------
+to concat the strings in tables
+select firstname || ' ' || lastname || ' ' email fullname , email from users 
+select first_name , last_name as surname from Customers - column aliases for temporary given column name 

@@ -1,0 +1,143 @@
+npm install node-signpdf fs
+const fs = require('fs');
+const path = require('path');
+const { SignPDF } = require('node-signpdf');
+const { readFileSync } = require('fs');
+const { PDFDocument } = require('pdf-lib');
+
+// Function to sign PDF
+async function signPdf(inputFilePath, outputFilePath, certificatePath, certificatePassword) {
+    try {
+        // Read the PDF to be signed
+        const pdfBuffer = readFileSync(inputFilePath);
+
+        // Read your private key certificate (pfx file or pem file)
+        const pfxBuffer = readFileSync(certificatePath);
+        
+        // You may need to handle the password to extract the private key (if using .pfx)
+        const privateKeyPassword = certificatePassword;
+
+        // Prepare the signer (you can skip extracting the certs if you use a simple PEM file)
+        const signer = new SignPDF(pfxBuffer, privateKeyPassword);
+
+        // Create the signature on the document
+        const signedPdf = await signer.sign(pdfBuffer);
+
+        // Write the signed PDF to the output file
+        fs.writeFileSync(outputFilePath, signedPdf);
+
+        console.log('Document signed successfully!');
+    } catch (err) {
+        console.error('Error signing document:', err);
+    }
+}
+
+// Usage example:
+const inputPdfPath = 'input.pdf'; // Path to the PDF you want to sign
+const outputPdfPath = 'uploads/signed_document.pdf'; // Where to save the signed PDF
+const certificatePath = 'path/to/your/certificate.pfx'; // Path to your PFX or PEM file
+const certificatePassword = 'yourPFXPassword'; // Password for the certificate if needed
+
+// Call the sign function
+signPdf(inputPdfPath, outputPdfPath, certificatePath, certificatePassword);
+const express = require('express');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+const { SignPDF } = require('node-signpdf');
+const { readFileSync } = require('fs');
+
+const app = express();
+const port = 3000;
+
+// Set up multer to upload files
+const upload = multer({ dest: 'uploads/' });
+
+// Function to sign the PDF
+async function signPdf(inputFilePath, outputFilePath, certificatePath, certificatePassword) {
+    try {
+        // Read the PDF to be signed
+        const pdfBuffer = readFileSync(inputFilePath);
+
+        // Read your private key certificate (pfx file or pem file)
+        const pfxBuffer = readFileSync(certificatePath);
+        
+        // You may need to handle the password to extract the private key (if using .pfx)
+        const privateKeyPassword = certificatePassword;
+
+        // Prepare the signer (you can skip extracting the certs if you use a simple PEM file)
+        const signer = new SignPDF(pfxBuffer, privateKeyPassword);
+
+        // Create the signature on the document
+        const signedPdf = await signer.sign(pdfBuffer);
+
+        // Write the signed PDF to the output file
+        fs.writeFileSync(outputFilePath, signedPdf);
+
+        console.log('Document signed successfully!');
+    } catch (err) {
+        console.error('Error signing document:', err);
+        throw new Error('Failed to sign PDF');
+    }
+}
+
+// Express route to upload a PDF, sign it, and return the signed PDF
+app.post('/sign', upload.single('pdfFile'), async (req, res) => {
+    const { certificatePath, certificatePassword } = req.body; // Get certificate info from the request
+
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded.' });
+    }
+
+    const inputPdfPath = req.file.path; // Path to uploaded file
+    const outputPdfPath = path.join(__dirname, 'uploads', 'signed_document.pdf'); // Save signed PDF
+
+    try {
+        // Sign the PDF
+        await signPdf(inputPdfPath, outputPdfPath, certificatePath, certificatePassword);
+
+        // Return the signed document path
+        res.json({
+            message: 'Document signed successfully.',
+            signedPdfPath: `/uploads/signed_document.pdf`, // URL to access signed document
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Error signing the document' });
+    }
+});
+
+// Endpoint to serve the uploaded files (signed PDFs)
+app.get('/uploads/:filename', (req, res) => {
+    const { filename } = req.params;
+    const filePath = path.join(__dirname, 'uploads', filename);
+    res.sendFile(filePath);
+});
+
+// Start the server
+app.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+});
+Start the Server:
+
+node app.js
+
+
+Post the PDF:
+Use Postman or cURL to send a POST request to /sign.
+
+URL: http://localhost:3000/sign
+
+Method: POST
+
+Form Data:
+
+pdfFile: The PDF you want to sign.
+
+certificatePath: Path to your .pfx or .pem certificate.
+
+certificatePassword: Password for your .pfx certificate (if needed).
+
+Access the Signed PDF:
+After signing the document, the signed PDF will be available at:
+
+http://localhost:3000/uploads/signed_document.pdf

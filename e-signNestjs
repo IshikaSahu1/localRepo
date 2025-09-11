@@ -1,0 +1,263 @@
+1. Project Setup
+a. Install NestJS CLI & Create Project
+
+First, install the NestJS CLI globally and generate a new NestJS project.
+
+npm i -g @nestjs/cli
+nestjs new aadhaar-esign-service
+cd aadhaar-esign-service
+
+b. Install Dependencies
+
+Install the necessary dependencies for NestJS, database (MySQL), PDF signing, and XML processing.
+
+npm install @nestjs/axios @nestjs/typeorm typeorm mysql2 pdf-lib node-signpdf xmlbuilder2 xml-crypto
+npm install --save-dev @nestjs/swagger class-validator class-transformer
+
+
+@nestjs/axios: To handle HTTP requests.
+
+@nestjs/typeorm, typeorm, mysql2: For MySQL integration.
+
+pdf-lib, node-signpdf: For PDF signing.
+
+xmlbuilder2, xml-crypto: For XML signing and cryptography.
+
+@nestjs/swagger, class-validator, class-transformer: For API documentation and validation.
+
+2. Directory Structure
+
+NestJS follows a modular approach, so it's best to structure the project into logical modules. Here's a suggested structure:
+
+/aadhaar-esign-service
+  ├── /src
+  │   ├── /common                # Common utilities, decorators, interceptors
+  │   ├── /modules
+  │   │   ├── /esign              # Main eSign module
+  │   │   │   ├── /controllers    # eSign API controllers
+  │   │   │   ├── /services       # Business logic (signing, validation)
+  │   │   │   ├── /dtos          # Data Transfer Objects for validation
+  │   │   │   ├── /entities      # MySQL entities (transactions, clients)
+  │   │   │   └── /jobs          # Asynchronous workers (queue, retries)
+  │   ├── /config                # Configuration files (DB, API keys, etc.)
+  │   └── main.ts                # Main entry point (Bootstrap app)
+  ├── /logs                      # Logs & monitoring data
+  └── /test                      # Test files
+
+3. Core Features & Implementation
+3.1 Authentication & API Key Management
+
+NestJS uses guards for authentication, which is perfect for API key validation or mTLS. We'll start by creating an API Key guard.
+
+auth.guard.ts:
+
+import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { Observable } from 'rxjs';
+
+@Injectable()
+export class ApiKeyGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean | Promise<boolean> | Observable<boolean> {
+    const request = context.switchToHttp().getRequest();
+    const apiKey = request.headers['x-api-key'];
+
+    if (!apiKey || apiKey !== process.env.API_KEY) { // API_KEY from environment
+      throw new UnauthorizedException('Invalid API Key');
+    }
+
+    return true;
+  }
+}
+
+
+Apply the guard globally or to specific routes.
+
+app.controller.ts:
+
+import { Controller, Post, UseGuards } from '@nestjs/common';
+import { ApiKeyGuard } from './auth.guard';
+
+@Controller('api/esign')
+export class EsignController {
+  @Post('initiate')
+  @UseGuards(ApiKeyGuard)  // Protect the endpoint with the API key guard
+  initiateSign() {
+    // Logic for initiation
+  }
+}
+
+3.2 PDF & XML Signing Service
+
+In NestJS, services handle the core logic. Let's create a service for signing PDF and XML.
+
+esign.service.ts:
+
+import { Injectable } from '@nestjs/common';
+import { PDFDocument } from 'pdf-lib';
+import * as nodeSignPDF from 'node-signpdf';
+import { signXML } from './utils/xml-signature'; // Define XML signing utility
+
+@Injectable()
+export class EsignService {
+  async signPDF(pdfBuffer: Buffer, privateKey: string): Promise<Buffer> {
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
+    const signedPdf = nodeSignPDF(pdfDoc, privateKey);
+    return signedPdf;
+  }
+
+  async signXML(xmlString: string, privateKey: string): Promise<string> {
+    return signXML(xmlString, privateKey); // Implement XML signing logic
+  }
+}
+
+
+utils/xml-signature.ts:
+
+import * as xmlbuilder from 'xmlbuilder2';
+import * as crypto from 'crypto';
+
+export function signXML(xmlString: string, privateKey: string): string {
+  const xml = xmlbuilder.create(xmlString);
+  const signature = crypto.createSign('RSA-SHA256').update(xml.toString()).end();
+  
+  xml.ele('Signature', signature); // Attach signature to XML
+  return xml.toString();
+}
+
+3.3 Webhooks & Callbacks
+
+Implement your webhook and callback routes to handle asynchronous responses.
+
+esign.controller.ts:
+
+import { Controller, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { EsignService } from './esign.service';
+import { ApiKeyGuard } from '../common/auth.guard';
+
+@Controller('api/esign')
+export class EsignController {
+  constructor(private readonly esignService: EsignService) {}
+
+  @Post('initiate')
+  @UseGuards(ApiKeyGuard)
+  async initiate(@Body() initiateDto: InitiateDto): Promise<{ txnId: string; redirectHtml: string }> {
+    // Handle initiation logic and return txnId and redirect HTML
+  }
+
+  @Post('webhook/:txnId')
+  @UseGuards(ApiKeyGuard)
+  async webhook(@Param('txnId') txnId: string, @Body() xmlResponse: string): Promise<void> {
+    // Verify CVL XML response, persist result, etc.
+  }
+
+  @Post('callback')
+  @UseGuards(ApiKeyGuard)
+  async callback(@Body() callbackDto: CallbackDto): Promise<void> {
+    // Notify the client with the signed document
+  }
+}
+
+3.4 Database Integration
+
+Use TypeORM for MySQL integration. Create your transaction entity to store signed documents, metadata, and audit logs.
+
+transaction.entity.ts:
+
+import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+
+@Entity()
+export class Transaction {
+  @PrimaryGeneratedColumn('uuid')
+  txnId: string;
+
+  @Column()
+  clientId: string;
+
+  @Column('json')
+  metadata: Record<string, any>;
+
+  @Column('text')
+  signedDocument: string;
+
+  @Column()
+  status: string;
+}
+
+
+esign.service.ts (Saving transaction):
+
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Transaction } from './entities/transaction.entity';
+
+@Injectable()
+export class EsignService {
+  constructor(
+    @InjectRepository(Transaction)
+    private readonly transactionRepository: Repository<Transaction>,
+  ) {}
+
+  async storeTransaction(txnId: string, clientId: string, metadata: Record<string, any>, signedDocument: string): Promise<Transaction> {
+    const transaction = new Transaction();
+    transaction.txnId = txnId;
+    transaction.clientId = clientId;
+    transaction.metadata = metadata;
+    transaction.signedDocument = signedDocument;
+    transaction.status = 'initiated';
+
+    return this.transactionRepository.save(transaction);
+  }
+}
+
+3.5 Error Handling & Observability
+
+Use Exception Filters to handle errors in a structured way.
+
+http-exception.filter.ts:
+
+import { ExceptionFilter, Catch, ArgumentsHost, HttpException, Logger } from '@nestjs/common';
+
+@Catch(HttpException)
+export class HttpExceptionFilter implements ExceptionFilter {
+  catch(exception: HttpException, host: ArgumentsHost) {
+    const context = host.switchToHttp();
+    const response = context.getResponse();
+    const status = exception.getStatus();
+    const message = exception.message;
+
+    Logger.error(`HTTP Exception: ${message}`, '', 'ExceptionFilter');
+    response.status(status).json({ statusCode: status, message });
+  }
+}
+
+
+Apply the exception filter globally in your main.ts:
+
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { HttpExceptionFilter } from './common/http-exception.filter';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  app.useGlobalFilters(new HttpExceptionFilter());
+  await app.listen(3000);
+}
+bootstrap();
+
+4. Deployment & Monitoring
+
+For deployment:
+
+Docker: Containerize the application for consistent deployment across environments.
+
+AWS: Use AWS for hosting (Elastic Beanstalk, EC2, or ECS). S3 for storing signed PDFs.
+
+Monitoring: Use Prometheus and Grafana for metrics and Winston for logging.
+
+5. Milestones
+
+API v1 Design: Define and freeze the API contract (Swagger docs).
+
+Core Service Development: Implement `/initiate
+
+You said:
